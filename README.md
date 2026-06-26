@@ -1,5 +1,5 @@
-# Code
+# Code 目录
 
-This directory is for stable project code intended to become the public package.
+这里放未来准备发布到 GitHub 的稳定项目代码。
 
-Do not place exploratory notebooks, one-off scripts, raw outputs, AF3 weights, or external project copies here.
+不要把探索性 notebook、一次性脚本、原始输出、AF3 权重或第三方项目源码放在这里。
