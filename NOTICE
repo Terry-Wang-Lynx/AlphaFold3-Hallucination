@@ -1,0 +1,28 @@
+AlphaFold3 Hallucination
+Copyright 2026 AlphaFold3 Hallucination Contributors
+
+This product contains semantic reproductions and adapters informed by:
+
+- AlphaFold 3, Google DeepMind, Apache License 2.0.
+  Audited source commit: b2f3d45fbfcacc5183bd5345d15df93571b8437f.
+- BindCraft, Martin Pacesa et al., MIT License.
+  Audited source commit: b971db42ba6e091afab63ccb30ae02215150a990.
+- ColabDesign, Sergey Ovchinnikov and contributors.
+  Audited source commit: e31a56fe1d9b4de25c8697f3a28b75892941cc72.
+
+BindCraft notice:
+
+  MIT License
+  Copyright (c) 2024 Martin Pacesa
+
+ColabDesign notice:
+
+  "THE BEER-WARE LICENSE" (Revision 42):
+  <so3@mit.edu> wrote this file. As long as you retain this notice you can do
+  whatever you want with this stuff. If we meet some day, and you think this
+  stuff is worth it, you can buy me a beer in return. Sergey Ovchinnikov
+
+The project does not redistribute AlphaFold 3 model parameters, databases, or
+third-party inverse-folding model weights. Optional third-party integrations
+are loaded from user-provided installations and remain subject to their own
+licenses.

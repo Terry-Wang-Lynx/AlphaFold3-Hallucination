@@ -1,0 +1,26 @@
+{
+  "artifact_policy": {
+    "databases_included": false,
+    "model_parameters_included": false,
+    "populated_inputs_included": false,
+    "raw_structures_included": false,
+    "third_party_inverse_folding_weights_included": false
+  },
+  "audited_sources": {
+    "alphafold3": "b2f3d45fbfcacc5183bd5345d15df93571b8437f",
+    "bindcraft": "b971db42ba6e091afab63ccb30ae02215150a990",
+    "colabdesign": "e31a56fe1d9b4de25c8697f3a28b75892941cc72",
+    "proteinmpnn": "8907e6671bfbfc92303b5f79c4b5e6ce47cdef57"
+  },
+  "platforms": {
+    "linux_core": "pass",
+    "linux_gpu_af3": "pass",
+    "macos_core": "pass"
+  },
+  "project": "AlphaFold3 Hallucination",
+  "published": false,
+  "review_date": "2026-07-31",
+  "review_status": "accepted_release_candidate",
+  "schema_version": "af3h_release_candidate_v1",
+  "version": "0.1.0rc1"
+}

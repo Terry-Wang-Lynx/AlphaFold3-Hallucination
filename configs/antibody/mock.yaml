@@ -1,0 +1,41 @@
+schema_version: 1
+kind: antibody
+run:
+  name: cross-platform-mock
+  id: mock-antibody-run
+
+hallucination:
+  backend: mock
+  seed: 7
+  bucket: 256
+  optimizer: sgd
+  learning_rate: 0.1
+  stages:
+    - {type: logits, steps: 2, soft_start: 0.0, soft_end: 1.0}
+  losses:
+    - {type: interface_contact, weight: 1.0}
+  checkpoints: [1, 2]
+  stopper: {type: none}
+  backend_config: {}
+
+antibody:
+  cdr_only: true
+  framework_fixed: true
+  antigen_fixed: true
+  hallucination:
+    plugin: mock
+    config: {artifact_name: hallucination_state}
+  diffusion:
+    plugin: mock
+    config: {artifact_name: anchor_structure}
+  inverse_folding:
+    plugin: mock
+    config: {artifact_name: sequence_pool}
+  consistency:
+    plugin: mock
+    config: {artifact_name: selected_sequences}
+  final_evaluation:
+    plugin: mock
+    config: {artifact_name: final_predictions}
+
+extensions: {}

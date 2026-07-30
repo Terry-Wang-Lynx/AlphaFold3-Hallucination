@@ -1,0 +1,54 @@
+schema_version: 1
+kind: hallucination
+run:
+  name: fast20-example
+
+hallucination:
+  backend: af3_jax
+  seed: 0
+  bucket: 256
+  design_recycles: 1
+  optimizer: sgd
+  learning_rate: 0.1
+  alpha: 2.0
+  init_scale: 0.01
+  omit_amino_acids: C
+
+  stages:
+    - name: fast_logits
+      type: logits
+      steps: 20
+      soft_start: 0.0
+      soft_end: 1.0
+      temperature_start: 1.0
+      temperature_end: 1.0
+
+  losses:
+    - type: intra_contact
+      weight: 1.0
+      parameters:
+        cutoff: 14.0
+        num: 2
+        seqsep: 9
+        binary: false
+    - type: interface_contact
+      weight: 1.0
+      parameters:
+        cutoff: 20.0
+        num: 2
+        binary: false
+
+  checkpoints: [5, 10, 20]
+  stopper:
+    type: none
+
+  backend_config:
+    binder_chain_id: B
+    binder_asym_id: 2
+    target_asym_id: 1
+    design_local_indices: [26, 27, 28, 29, 30, 31, 32, 33]
+    hotspot_local_indices: [10, 11, 12]
+    flash_attention: xla
+    remat: true
+
+extensions: {}

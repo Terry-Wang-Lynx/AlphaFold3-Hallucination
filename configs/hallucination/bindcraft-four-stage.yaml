@@ -1,0 +1,35 @@
+schema_version: 1
+kind: hallucination
+run:
+  name: bindcraft-four-stage-reference
+
+hallucination:
+  backend: af3_jax
+  seed: 0
+  bucket: 256
+  design_recycles: 1
+  optimizer: sgd
+  learning_rate: 0.1
+  omit_amino_acids: C
+
+  stages:
+    - {name: g1_logits, type: logits, steps: 50, soft_start: 0.0, soft_end: 0.9}
+    - {name: additional_logits, type: logits, steps: 25, soft_start: 0.0, soft_end: 1.0}
+    - {name: g2_soft, type: soft, steps: 45, temperature_start: 1.0, temperature_end: 0.01}
+    - {name: g3_hard, type: hard, steps: 5}
+    - {name: g4_semigreedy, type: semigreedy, steps: 15, tries: 2}
+
+  losses:
+    - {type: intra_contact, weight: 1.0, parameters: {cutoff: 14.0, num: 2, seqsep: 9, binary: false}}
+    - {type: interface_contact, weight: 1.0, parameters: {cutoff: 20.0, num: 2, binary: false}}
+    - {type: helix, weight: -0.3}
+
+  checkpoints: [50, 75, 120, 125]
+  stopper: {type: none}
+  backend_config:
+    binder_chain_id: B
+    binder_asym_id: 2
+    target_asym_id: 1
+
+extensions:
+  note: The semigreedy stage needs a candidate scorer through the Python API.

@@ -1,0 +1,76 @@
+schema_version: 1
+kind: antibody
+run:
+  name: antibody-first-party-af3
+
+hallucination:
+  backend: af3_jax
+  seed: 0
+  bucket: 256
+  design_recycles: 1
+  optimizer: sgd
+  learning_rate: 0.1
+  stages:
+    - {name: fast_logits, type: logits, steps: 20, soft_start: 0.0, soft_end: 1.0}
+  losses:
+    - {type: intra_contact, weight: 1.0, parameters: {cutoff: 14.0, num: 2, seqsep: 9, binary: false}}
+    - {type: interface_contact, weight: 1.0, parameters: {cutoff: 20.0, num: 2, binary: false}}
+  checkpoints: [20]
+  stopper: {type: none}
+  backend_config:
+    binder_chain_id: B
+    binder_asym_id: 2
+    target_asym_id: 1
+
+antibody:
+  cdr_only: true
+  framework_fixed: true
+  antigen_fixed: true
+  hallucination:
+    plugin: af3_jax
+    config:
+      input_json: ${AF3_POPULATED_INPUT}
+      model_dir: ${AF3_MODEL_DIR}
+  diffusion:
+    plugin: af3
+    config:
+      model_dir: ${AF3_MODEL_DIR}
+      checkpoint_forward: 20
+      trunk_seed: 11
+      diffusion_seed: 101
+      diffusion_steps: 200
+      num_recycles: 3
+  inverse_folding:
+    plugin: candidate_command
+    config:
+      command:
+        - run-cdr-inverse-folding
+        - --anchor
+        - "{anchor_structure}"
+        - --output
+        - "{step_dir}/candidates.json"
+      artifacts: {candidate_pool: candidates.json}
+  consistency:
+    plugin: af3_fixed_geometry
+    config:
+      model_dir: ${AF3_MODEL_DIR}
+      scorer_seed: 23
+      design_recycles: 1
+      cdr3_local_indices: [26, 27, 28, 29, 30, 31, 32, 33]
+      thresholds:
+        consistency_loss_max: 0.30
+        all_cdr_plddt_min: 70.0
+        cdr3_plddt_min: 70.0
+        cdr_patch_pae_max: 15.0
+        cdr_patch_pde_max: 8.0
+      top_k: 1
+  final_evaluation:
+    plugin: af3
+    config:
+      model_dir: ${AF3_MODEL_DIR}
+      seeds: [31, 37, 41]
+      diffusion_steps: 200
+      num_recycles: 3
+
+extensions:
+  note: The inverse-folder executable must emit the af3h_candidate_pool_v1 JSON contract.

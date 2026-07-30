@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "af3-hallucination"
+version = "0.1.0rc1"
+description = "Extensible JAX hallucination and antibody-design workflows for AlphaFold 3"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "AlphaFold3 Hallucination Contributors"}]
+keywords = ["alphafold3", "jax", "protein-design", "antibody-design", "hallucination"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+af3 = ["jax==0.6.1", "dm-haiku==0.0.14", "optax==0.2.8", "numpy>=2.1,<2.3"]
+dev = ["build>=1.2", "numpy>=1.26", "pytest>=8.2", "pytest-cov>=5", "ruff>=0.9"]
+
+[project.scripts]
+af3h = "af3_hallucination.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+af3_hallucination = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "af3: requires an installed AlphaFold 3 runtime",
+  "gpu: requires a CUDA-capable GPU",
+  "integration: exercises multiple public components",
+]
+
+[tool.ruff]
+line-length = 96
+target-version = "py310"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
