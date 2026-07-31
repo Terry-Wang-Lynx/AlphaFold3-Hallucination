@@ -3,7 +3,7 @@
 An extensible JAX research framework for AlphaFold 3 sequence hallucination,
 plus a modular antibody-design workflow.
 
-> Status: accepted release candidate; publication is deliberately held. This
+> Status: GitHub-ready release candidate; publication is deliberately held. This
 > repository does not include AlphaFold 3 parameters, genetic databases,
 > third-party inverse-folding model weights, or precomputed biological inputs.
 
@@ -65,10 +65,11 @@ af3h hallucinate run configs/hallucination/fast20.yaml \
   --output-dir runs/example
 ```
 
-The optional `af3` extra pins the exact JAX/Haiku/Optax versions used for the
-Linux release-candidate validation. Do not install it over an existing official
-AF3 environment with different dependency pins; use that environment's tested
-versions instead.
+Install this package into an independently prepared official AF3 environment.
+The project deliberately does not provide an `af3` dependency extra because
+official AF3 releases own a coupled JAX/Haiku/Optax dependency set; installing
+generic pins over that environment can make an otherwise valid runtime
+inconsistent.
 
 See [docs/configuration.md](docs/configuration.md),
 [docs/antibody-workflow.md](docs/antibody-workflow.md), and
@@ -90,5 +91,5 @@ ColabDesign, ProteinMPNN, and optional inverse-folding tools retain their own
 licenses and must be installed separately. See [NOTICE](NOTICE) and
 [docs/references.md](docs/references.md).
 
-The current tree is an accepted release candidate, not a published release.
+The current tree is a GitHub-ready release candidate, not a published release.
 See [release/RELEASE_CHECKLIST.md](release/RELEASE_CHECKLIST.md).

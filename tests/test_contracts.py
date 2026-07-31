@@ -41,3 +41,13 @@ def test_candidate_pool_rejects_duplicate_ids():
             reference_sequence="AAAAA",
             design_local_indices=[2],
         )
+
+
+@pytest.mark.parametrize("indices", [[2, 2], [True]])
+def test_candidate_pool_rejects_ambiguous_design_indices(indices):
+    with pytest.raises(PluginError, match="design_local_indices"):
+        normalize_candidate_pool(
+            {"candidates": ["AANAA"]},
+            reference_sequence="AAAAA",
+            design_local_indices=indices,
+        )

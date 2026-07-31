@@ -54,6 +54,44 @@ def _mapping(name: str, value: Any) -> dict[str, Any]:
     return dict(value)
 
 
+def validate_stopper(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize a public metric-stopper definition."""
+
+    data = _mapping("hallucination.stopper", value)
+    stopper_type = str(data.pop("type", "none"))
+    if stopper_type == "none":
+        if data:
+            raise ConfigurationError(
+                f"unknown keys in a none stopper: {sorted(data)}"
+            )
+        return {"type": "none"}
+    if stopper_type not in {"all", "any"}:
+        raise ConfigurationError("stopper.type must be none, all, or any")
+    conditions = data.pop("conditions", None)
+    if data:
+        raise ConfigurationError(f"unknown stopper keys: {sorted(data)}")
+    if not isinstance(conditions, list) or not conditions:
+        raise ConfigurationError("metric stopper requires a non-empty conditions list")
+    normalized = []
+    for index, condition in enumerate(conditions):
+        row = _mapping(f"hallucination.stopper.conditions[{index}]", condition)
+        metric = row.pop("metric", None)
+        if not isinstance(metric, str) or not metric.strip():
+            raise ConfigurationError("stopper condition metric must be non-empty")
+        operator = row.pop("operator", None)
+        if operator not in {"<=", "<", ">=", ">"}:
+            raise ConfigurationError("stopper operator must be <=, <, >=, or >")
+        threshold = _finite("stopper condition value", row.pop("value", None))
+        if row:
+            raise ConfigurationError(
+                f"unknown stopper condition keys: {sorted(row)}"
+            )
+        normalized.append(
+            {"metric": metric.strip(), "operator": operator, "value": threshold}
+        )
+    return {"type": stopper_type, "conditions": normalized}
+
+
 @dataclasses.dataclass(frozen=True)
 class StageSpec:
     """One freely ordered Hallucination stage."""
@@ -229,7 +267,7 @@ class HallucinationSpec:
         total_gradient_steps = sum(stage.steps for stage in stages if stage.type != "semigreedy")
         if checkpoints and checkpoints[-1] > total_gradient_steps:
             raise ConfigurationError("a hallucination checkpoint exceeds the number of gradient steps")
-        stopper = _mapping("hallucination.stopper", data.pop("stopper", {"type": "none"}))
+        stopper = validate_stopper(data.pop("stopper", {"type": "none"}))
         backend_config = _mapping("hallucination.backend_config", data.pop("backend_config", {}))
         if data:
             raise ConfigurationError(f"unknown hallucination keys: {sorted(data)}")
@@ -342,6 +380,24 @@ def parse_config(value: Mapping[str, Any], *, source_path: Path | None = None) -
     antibody = None
     if kind == "antibody":
         antibody = AntibodySpec.from_mapping(_mapping("antibody", antibody_raw))
+        hallucination_plugin = antibody.steps["hallucination"].plugin
+        if hallucination_plugin == "af3_jax":
+            design_local = hallucination.backend_config.get("design_local_indices")
+            if not isinstance(design_local, (list, tuple)) or not design_local:
+                raise ConfigurationError(
+                    "the af3_jax antibody workflow requires non-empty "
+                    "hallucination.backend_config.design_local_indices"
+                )
+            if "design_token_indices" in hallucination.backend_config:
+                raise ConfigurationError(
+                    "the af3_jax antibody workflow requires chain-local "
+                    "design_local_indices, not design_token_indices"
+                )
+        if antibody.steps["inverse_folding"].plugin == "command":
+            raise ConfigurationError(
+                "antibody inverse_folding must use candidate_command instead of the "
+                "unvalidated generic command plugin"
+            )
     elif antibody_raw is not None:
         raise ConfigurationError("antibody is only valid when kind='antibody'")
     run = _mapping("run", data.pop("run", {}))

@@ -127,17 +127,22 @@ def _run(args: argparse.Namespace) -> int:
             }
         )
         return 0
-    raise AssertionError(args.command)
+    raise RuntimeError(f"unhandled command: {args.command}")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    original_argv = sys.argv
+    sys.argv = [original_argv[0]]
     try:
-        return _run(args)
-    except (AF3HallucinationError, FileNotFoundError, ValueError, RuntimeError) as exc:
-        print(f"af3h: {exc}", file=sys.stderr)
-        return 2
+        try:
+            return _run(args)
+        except (AF3HallucinationError, FileNotFoundError, ValueError, RuntimeError) as exc:
+            print(f"af3h: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        sys.argv = original_argv
 
 
 if __name__ == "__main__":

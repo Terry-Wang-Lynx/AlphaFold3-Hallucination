@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .config import HallucinationSpec, StageSpec
+from .errors import ConfigurationError
 
 SCHEDULE_PROVENANCE = {
     "bindcraft_commit": "b971db42ba6e091afab63ccb30ae02215150a990",
@@ -24,9 +25,12 @@ def ramp(start: float, end: float, index: int, steps: int, *, quadratic: bool = 
 
 def expand_stage(stage: StageSpec, *, stage_index: int, global_offset: int, default_lr: float) -> list[dict[str, Any]]:
     rows = []
-    assert stage.soft_start is not None and stage.soft_end is not None
-    assert stage.temperature_start is not None and stage.temperature_end is not None
-    assert stage.hard_start is not None and stage.hard_end is not None
+    if stage.soft_start is None or stage.soft_end is None:
+        raise ConfigurationError("stage soft ramp endpoints are missing")
+    if stage.temperature_start is None or stage.temperature_end is None:
+        raise ConfigurationError("stage temperature ramp endpoints are missing")
+    if stage.hard_start is None or stage.hard_end is None:
+        raise ConfigurationError("stage hard ramp endpoints are missing")
     step_end = stage.step_start if stage.step_end is None else stage.step_end
     for index in range(stage.steps):
         soft = ramp(stage.soft_start, stage.soft_end, index, stage.steps)

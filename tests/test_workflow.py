@@ -58,3 +58,43 @@ def test_rejected_gate_skips_final_evaluation(tmp_path):
     assert state["status"] == "rejected"
     assert state["steps"]["consistency"]["status"] == "rejected"
     assert state["steps"]["final_evaluation"]["status"] == "skipped"
+
+
+def test_skipped_workflow_is_terminal_on_resume(tmp_path):
+    class Skip:
+        calls = 0
+
+        def run(self, *, context, config):
+            del config
+            self.__class__.calls += 1
+            artifact = context.step_dir / "skipped.json"
+            artifact.write_text('{"status":"skipped"}\n')
+            return PluginResult("skipped", {"decision": artifact}, {"eligible": 0})
+
+    config = load_config(ROOT / "configs/antibody/mock.yaml")
+    registry = default_registry()
+    registry.register("consistency", "mock", Skip, replace=True)
+    workflow = AntibodyWorkflow(config, registry=registry)
+    output = tmp_path / "skipped"
+    state = workflow.run(output)
+    resumed = workflow.run(output, resume=True)
+    assert state["status"] == "skipped"
+    assert resumed["completed_at_unix"] == state["completed_at_unix"]
+    assert Skip.calls == 1
+
+
+def test_plugin_cannot_silently_mutate_an_upstream_artifact(tmp_path):
+    class MutateUpstream:
+        def run(self, *, context, config):
+            del config
+            first = next(iter(context.artifacts.values()))
+            first.write_text("mutated\n")
+            artifact = context.step_dir / "new.json"
+            artifact.write_text("{}\n")
+            return PluginResult("completed", {"new": artifact}, {})
+
+    config = load_config(ROOT / "configs/antibody/mock.yaml")
+    registry = default_registry()
+    registry.register("diffusion", "mock", MutateUpstream, replace=True)
+    with pytest.raises(ResumeError, match="artifact .* changed"):
+        AntibodyWorkflow(config, registry=registry).run(tmp_path / "mutated")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -24,7 +25,9 @@ class PluginRegistry:
     def __init__(self) -> None:
         self._factories: dict[str, dict[str, PluginFactory]] = {}
 
-    def register(self, kind: str, name: str, factory: PluginFactory, *, replace: bool = False) -> None:
+    def register(
+        self, kind: str, name: str, factory: PluginFactory, *, replace: bool = False
+    ) -> None:
         if not kind or not name:
             raise PluginError("plugin kind and name must be non-empty")
         family = self._factories.setdefault(kind, {})
@@ -72,9 +75,24 @@ class CommandPlugin:
     """
 
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        unknown = set(config) - {
+            "command",
+            "env",
+            "timeout_seconds",
+            "result_json",
+            "artifacts",
+        }
+        if unknown:
+            raise PluginError(f"unknown command plugin keys: {sorted(unknown)}")
         command = config.get("command")
-        if not isinstance(command, list) or not command or not all(isinstance(x, str) for x in command):
-            raise PluginError("command plugin requires config.command as a non-empty string list")
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(x, str) for x in command)
+        ):
+            raise PluginError(
+                "command plugin requires config.command as a non-empty string list"
+            )
         step_dir = Path(context.step_dir)
         step_dir.mkdir(parents=True, exist_ok=True)
         values = {
@@ -89,16 +107,43 @@ class CommandPlugin:
         raw_env = config.get("env", {})
         if not isinstance(raw_env, Mapping):
             raise PluginError("command plugin config.env must be a mapping")
-        env.update({str(key): _render_token(str(value), values) for key, value in raw_env.items()})
-        started = time.time()
-        completed = subprocess.run(
-            rendered,
-            cwd=str(step_dir),
-            env=env,
-            check=False,
-            text=True,
-            capture_output=True,
+        env.update(
+            {str(key): _render_token(str(value), values) for key, value in raw_env.items()}
         )
+        raw_timeout = config.get("timeout_seconds")
+        try:
+            timeout = None if raw_timeout is None else float(raw_timeout)
+        except (TypeError, ValueError) as exc:
+            raise PluginError(
+                "command plugin timeout_seconds must be finite and positive"
+            ) from exc
+        if timeout is not None and (not math.isfinite(timeout) or timeout <= 0):
+            raise PluginError("command plugin timeout_seconds must be finite and positive")
+        started = time.time()
+        try:
+            completed = subprocess.run(
+                rendered,
+                cwd=str(step_dir),
+                env=env,
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = (
+                exc.stdout.decode(errors="replace")
+                if isinstance(exc.stdout, bytes)
+                else exc.stdout
+            )
+            stderr = (
+                exc.stderr.decode(errors="replace")
+                if isinstance(exc.stderr, bytes)
+                else exc.stderr
+            )
+            (step_dir / "stdout.log").write_text(stdout or "")
+            (step_dir / "stderr.log").write_text(stderr or "")
+            raise PluginError(f"external command timed out after {timeout} seconds") from exc
         (step_dir / "stdout.log").write_text(completed.stdout)
         (step_dir / "stderr.log").write_text(completed.stderr)
         if completed.returncode != 0:
@@ -145,6 +190,9 @@ class MockPlugin:
     """Deterministic cross-platform workflow plugin used by examples and CI."""
 
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        unknown = set(config) - {"artifact_name", "file_name", "value"}
+        if unknown:
+            raise PluginError(f"unknown mock plugin keys: {sorted(unknown)}")
         step_dir = Path(context.step_dir)
         step_dir.mkdir(parents=True, exist_ok=True)
         artifact_name = str(config.get("artifact_name", f"{context.step_name}_artifact"))
@@ -155,7 +203,9 @@ class MockPlugin:
             "run_id": context.run_id,
             "step": context.step_name,
             "seed": context.seed,
-            "input_artifacts": {name: sha256_file(path) for name, path in context.artifacts.items()},
+            "input_artifacts": {
+                name: sha256_file(path) for name, path in context.artifacts.items()
+            },
             "value": config.get("value", context.step_name),
         }
         output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -186,7 +236,8 @@ def default_registry() -> PluginRegistry:
         "final_evaluation",
     ):
         registry.register(kind, "mock", MockPlugin)
-        registry.register(kind, "command", CommandPlugin)
+        if kind != "inverse_folding":
+            registry.register(kind, "command", CommandPlugin)
     registry.register("pocket_redesign", "not_implemented", PocketPlaceholderPlugin)
     from .builtin_plugins import register_builtin_plugins
 

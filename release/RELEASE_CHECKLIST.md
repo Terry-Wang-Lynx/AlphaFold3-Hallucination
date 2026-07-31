@@ -1,4 +1,4 @@
-# Release checklist: 0.1.0rc1
+# Release checklist: 0.1.0rc2
 
 Release-candidate review date: 2026-07-31.
 
@@ -12,6 +12,12 @@ Release-candidate review date: 2026-07-31.
 - [x] Linux RTX 4090 AF3/JAX gradient and two-schedule smokes pass.
 - [x] Diffusion, no-diffusion Consistency, and multi-seed full AF3 smokes pass.
 - [x] First-party five-step workflow, resume, and independent hash audit pass.
+- [x] Explicit CDR-only and candidate-eligibility invariants fail closed.
+- [x] Checkpoint, anchor, Consistency, and final-evaluation manifests are hash-linked.
+- [x] Workflow resume rejects changed upstream artifacts and malformed state.
+- [x] GitHub Actions are least-privilege, pinned, and checked with `actionlint`.
+- [x] Secret, dependency, static-security, metadata, and wheel-content scans pass.
+- [x] A second clean macOS/Linux validation and standalone source-archive replay pass.
 - [x] License, NOTICE, citations, contribution, and security documents are present.
 - [x] Release tree contains no parameters, databases, populated inputs, raw structures, private paths, or large outputs.
 - [x] Wheel and sdist contents have been inspected.

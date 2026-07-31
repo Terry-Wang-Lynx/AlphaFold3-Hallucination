@@ -1,6 +1,8 @@
 import json
+import sys
 from pathlib import Path
 
+import af3_hallucination.cli as cli
 from af3_hallucination.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,3 +41,13 @@ def test_pocket_is_explicit_placeholder(capsys):
     assert main(["pocket", "status"]) == 0
     value = json.loads(capsys.readouterr().out)
     assert value["status"] == "not_implemented"
+
+
+def test_cli_hides_argparse_options_from_optional_absl_runtimes(monkeypatch):
+    original = ["af3h", "caller-flag"]
+    observed = []
+    monkeypatch.setattr(sys, "argv", original)
+    monkeypatch.setattr(cli, "_run", lambda args: observed.append(list(sys.argv)) or 0)
+    assert cli.main(["doctor"]) == 0
+    assert observed == [["af3h"]]
+    assert sys.argv is original

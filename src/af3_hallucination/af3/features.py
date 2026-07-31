@@ -27,10 +27,10 @@ The residual probe showed stale msa query rows are not negligible (interface
 contact residual ~45% of the sequence main effect; grad cosine ~0.35), so this
 adapter is part of the prototype default rather than a deferred option.
 
-Atom-layout fields (ref_*, dense atom layout) are NOT updated here: they depend
-on residue identity but the designable-batch-probe found token-only injection
-reproduces ~97% of the true sequence response. V0 keeps the atom layout fixed;
-re-featurisation per identity is a gradient-free option tracked separately.
+Atom-layout fields (ref_*, dense atom layout) are not updated by these helpers.
+The public engine instead re-featurises a legal hard-argmax carrier at every
+evaluation, then overlays the differentiable soft query/profile channels at the
+declared design positions.
 """
 
 from __future__ import annotations

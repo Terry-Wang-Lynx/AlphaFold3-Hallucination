@@ -5,10 +5,9 @@ Direct port of the model-agnostic core of ColabDesign `soft_seq()`
 AF2/AF3-specific and is reused verbatim in spirit: only the alphabet width and
 the chain/design masking are project choices.
 
-The optimisation variable is `logits` over the design positions only. The
-binder protocol keeps the target fixed and concatenates target one-hot ahead of
-the binder logits at feature-injection time (see features.py), so the gradient
-flows only into binder positions.
+The optimisation variable is `logits` over the declared design positions only.
+The binder protocol keeps the target and non-design binder positions fixed, so
+the gradient flows only into those explicitly mutable positions.
 
 AF3 polymer alphabet width is residue_names.POLYMER_TYPES_NUM_WITH_UNKNOWN_AND_GAP
 (= 31), the same width create_target_feat() one-hots aatype to.

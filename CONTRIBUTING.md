@@ -3,10 +3,12 @@
 Use Python 3.10 or newer. Keep the core importable without JAX or AlphaFold 3.
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,release]'
 ruff check src tests
 pytest
 python -m build
+twine check dist/*
+check-wheel-contents dist/*.whl
 ```
 
 New AF3 behavior must identify whether it directly reuses, semantically

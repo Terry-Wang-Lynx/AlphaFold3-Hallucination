@@ -1,4 +1,10 @@
 .venv/
+.DS_Store
+.coverage
+coverage.xml
+htmlcov/
+.idea/
+.vscode/
 build/
 dist/
 *.egg-info/

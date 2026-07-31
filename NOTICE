@@ -26,3 +26,7 @@ The project does not redistribute AlphaFold 3 model parameters, databases, or
 third-party inverse-folding model weights. Optional third-party integrations
 are loaded from user-provided installations and remain subject to their own
 licenses.
+
+This independent research project is not affiliated with or endorsed by Google
+DeepMind. AlphaFold and third-party project names remain the property of their
+respective owners.

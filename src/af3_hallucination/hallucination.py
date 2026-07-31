@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import platform
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import ProjectConfig
-from .hashing import sha256_file
+from .hashing import canonical_sha256, sha256_file
 from .schedule import SCHEDULE_PROVENANCE, expand_schedule
 from .version import __version__
 
@@ -26,11 +27,15 @@ def _write_json(path: Path, value: Any) -> None:
 
 def _protein_sequence(path: Path, chain_id: str) -> str:
     document = json.loads(path.read_text())
-    matches = [
-        entry["protein"]["sequence"]
-        for entry in document.get("sequences", [])
-        if "protein" in entry and entry["protein"].get("id") == chain_id
-    ]
+    matches = []
+    for entry in document.get("sequences", []):
+        protein = entry.get("protein")
+        identifier = None if protein is None else protein.get("id")
+        if protein and (
+            identifier == chain_id
+            or (isinstance(identifier, list) and identifier == [chain_id])
+        ):
+            matches.append(protein["sequence"])
     if len(matches) != 1:
         raise ValueError(f"expected one protein chain {chain_id!r} in {path}")
     return str(matches[0])
@@ -138,9 +143,7 @@ def run_hallucination(
         any(stage.type == "semigreedy" for stage in config.hallucination.stages)
         and semigreedy_scorer is None
     ):
-        raise ValueError(
-            "a semigreedy stage requires semigreedy_scorer through the Python API"
-        )
+        raise ValueError("a semigreedy stage requires semigreedy_scorer through the Python API")
     from .af3.engine import (
         AF3JaxHallucinationEngine,
         PreparedDesign,
@@ -156,6 +159,8 @@ def run_hallucination(
         raise FileNotFoundError(input_path)
     if not (model_path / "af3.bin").is_file():
         raise FileNotFoundError(model_path / "af3.bin")
+    input_sha256 = sha256_file(input_path)
+    hallucination_sha256 = canonical_sha256(dataclasses.asdict(config.hallucination))
     backend = dict(config.hallucination.backend_config)
     import numpy as np
 
@@ -224,14 +229,23 @@ def run_hallucination(
 
     final_sequence = "".join(AF3_AA_ORDER[int(value)] for value in final_binder_ids)
     (root / "final_sequence.txt").write_text(final_sequence + "\n")
-    _write_json(root / "checkpoints.json", {"checkpoints": checkpoint_records})
+    _write_json(
+        root / "checkpoints.json",
+        {
+            "schema_version": "af3h_checkpoints_v1",
+            "hallucination_sha256": hallucination_sha256,
+            "input_sha256": input_sha256,
+            "checkpoints": checkpoint_records,
+        },
+    )
     _write_json(root / "stage_summaries.json", engine.stage_summaries)
     summary = {
         "schema_version": "af3h_hallucination_summary_v1",
         "status": "completed",
         "package_version": __version__,
         "config_sha256": config.sha256,
-        "input_sha256": sha256_file(input_path),
+        "input_sha256": input_sha256,
+        "hallucination_sha256": hallucination_sha256,
         "input_basename": input_path.name,
         "af3_source_commit_audited": "b2f3d45fbfcacc5183bd5345d15df93571b8437f",
         "af3_parameter_identifier": engine.parameter_identifier,
@@ -246,7 +260,9 @@ def run_hallucination(
         "completed_steps": len(trajectory),
         "checkpoint_count": len(checkpoint_records),
         "final_loss": trajectory[-1]["loss"] if trajectory else None,
-        "final_sequence_sha256": __import__("hashlib").sha256(final_sequence.encode()).hexdigest(),
+        "final_sequence_sha256": __import__("hashlib")
+        .sha256(final_sequence.encode())
+        .hexdigest(),
         "final_logits_sha256": sha256_file(final_logits),
         "runtime_seconds": round(time.time() - started, 6),
         "platform": {

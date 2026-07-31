@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -13,11 +14,23 @@ from .errors import PluginError
 from .hallucination import run_hallucination
 from .plugins import CommandPlugin, PluginRegistry, PluginResult
 
+_ENV_REFERENCE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+
 
 def _runtime_path(context, value: Any, name: str) -> Path:
     if not isinstance(value, (str, os.PathLike)) or not str(value).strip():
         raise PluginError(f"{name} must be a non-empty path")
-    expanded = Path(os.path.expandvars(str(value))).expanduser()
+    raw = str(value)
+    missing = sorted(
+        {
+            match.group(1) or match.group(2)
+            for match in _ENV_REFERENCE.finditer(raw)
+            if (match.group(1) or match.group(2)) not in os.environ
+        }
+    )
+    if missing:
+        raise PluginError(f"{name} references unset environment variables: {missing}")
+    expanded = Path(os.path.expandvars(raw)).expanduser()
     if not expanded.is_absolute():
         expanded = context.config_dir / expanded
     return expanded.resolve()
@@ -35,10 +48,29 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+def _require_known_keys(config: Mapping[str, Any], allowed: set[str], label: str) -> None:
+    unknown = set(config) - allowed
+    if unknown:
+        raise PluginError(f"unknown {label} plugin keys: {sorted(unknown)}")
+
+
 class AF3JaxHallucinationPlugin:
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        _require_known_keys(config, {"input_json", "model_dir"}, "af3_jax")
         if context.project_config is None:
             raise PluginError("AF3 Hallucination plugin requires the resolved project config")
+        backend = context.project_config.hallucination.backend_config
+        design_local = backend.get("design_local_indices")
+        if not isinstance(design_local, (list, tuple)) or not design_local:
+            raise PluginError(
+                "the CDR-only antibody workflow requires non-empty "
+                "hallucination.backend_config.design_local_indices"
+            )
+        if "design_token_indices" in backend:
+            raise PluginError(
+                "the CDR-only antibody workflow requires chain-local design indices, "
+                "not design_token_indices"
+            )
         input_json = _runtime_path(context, config.get("input_json"), "input_json")
         model_dir = _runtime_path(context, config.get("model_dir"), "model_dir")
         run_dir = Path(context.step_dir) / "run"
@@ -67,6 +99,20 @@ class AF3JaxHallucinationPlugin:
 
 class AF3DiffusionPlugin:
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        _require_known_keys(
+            config,
+            {
+                "input_artifact",
+                "checkpoints_artifact",
+                "model_dir",
+                "checkpoint_forward",
+                "trunk_seed",
+                "diffusion_seed",
+                "diffusion_steps",
+                "num_recycles",
+            },
+            "af3 diffusion",
+        )
         if context.project_config is None:
             raise PluginError("AF3 diffusion plugin requires the resolved project config")
         from .af3.runtime import decode_checkpoint
@@ -114,6 +160,7 @@ class FrozenCandidatePlugin:
     """Publish user-supplied candidates for tests and frozen-sequence evaluations."""
 
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        _require_known_keys(config, {"candidates"}, "frozen_candidates")
         anchor, _ = _anchor_contract(context)
         candidates = normalize_candidate_pool(
             {"candidates": config.get("candidates")},
@@ -176,6 +223,20 @@ class CandidateCommandPlugin:
 
 class AF3ConsistencyPlugin:
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        _require_known_keys(
+            config,
+            {
+                "anchor_artifact",
+                "candidate_artifact",
+                "model_dir",
+                "scorer_seed",
+                "design_recycles",
+                "cdr3_local_indices",
+                "thresholds",
+                "top_k",
+            },
+            "af3_fixed_geometry",
+        )
         from .af3.runtime import score_consistency_pool
 
         anchor = _artifact(context, config, "anchor_artifact", "anchor_manifest")
@@ -206,12 +267,22 @@ class AF3ConsistencyPlugin:
 
 class AF3FinalEvaluationPlugin:
     def run(self, *, context, config: Mapping[str, Any]) -> PluginResult:
+        _require_known_keys(
+            config,
+            {
+                "anchor_artifact",
+                "selected_artifact",
+                "model_dir",
+                "seeds",
+                "diffusion_steps",
+                "num_recycles",
+            },
+            "af3 final evaluation",
+        )
         from .af3.runtime import evaluate_selected_candidates
 
         anchor = _artifact(context, config, "anchor_artifact", "anchor_manifest")
-        selected = _artifact(
-            context, config, "selected_artifact", "consistency_results"
-        )
+        selected = _artifact(context, config, "selected_artifact", "consistency_results")
         model_dir = _runtime_path(context, config.get("model_dir"), "model_dir")
         result = evaluate_selected_candidates(
             anchor_manifest=anchor,

@@ -21,6 +21,7 @@ hallucination:
     binder_chain_id: B
     binder_asym_id: 2
     target_asym_id: 1
+    design_local_indices: [26, 27, 28, 29, 30, 31, 32, 33]
 
 antibody:
   cdr_only: true

@@ -40,9 +40,10 @@ The public antibody contract fixes the antigen and antibody framework and
 allows changes only at declared CDR tokens. Alternative inverse folders and
 evaluators are command or Python plugins rather than hard-coded dependencies.
 
-All five built-in workflow boundaries publish versioned JSON/NPZ artifacts and
-the orchestrator records SHA-256, byte count, producer, runtime, and complete
-configuration hash. A rejected Consistency Gate stops the workflow fail-closed.
+All five built-in workflow boundaries publish versioned manifests plus their
+declared array or structure artifacts. The orchestrator records SHA-256, byte
+count, producer, runtime, and complete configuration hash. A rejected
+Consistency Gate stops the workflow fail-closed.
 
 ## Pocket placeholder
 

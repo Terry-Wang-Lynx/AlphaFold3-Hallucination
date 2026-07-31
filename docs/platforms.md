@@ -26,10 +26,10 @@ When AF3 is provided through Apptainer/Singularity, bind the project source and
 set `PYTHONPATH=/path/to/af3-hallucination/src:/path/to/alphafold3:/path/to/alphafold3/src`.
 The package neither downloads nor discovers model parameters automatically.
 
-The `af3` optional extra is a convenience pin for the release-candidate runtime
-(`jax 0.6.1`, `dm-haiku 0.0.14`, `optax 0.2.8`). It is not a substitute for the
-official AF3 installation and should not overwrite another AF3 release's own
-dependency constraints.
+The project does not publish a generic `af3` dependency extra. Official AF3
+releases own a coupled JAX/Haiku/Optax dependency set, so model execution must
+use the environment prepared for that AF3 release rather than overlaying
+project-supplied pins.
 
 ## Resource policy
 

@@ -16,10 +16,13 @@ configuration declaration alone.
 
 `mock` is deterministic and supports macOS/Linux integration testing.
 
-`command` launches an external adapter as an argument list without a shell. It
-can reference `{step_dir}`, `{output_dir}`, `{run_id}`, `{seed}`, and artifacts
-published by previous steps. The process must exit zero and create every
-declared artifact.
+`command` launches an external adapter as an argument list without a local
+shell. It can reference `{step_dir}`, `{output_dir}`, `{run_id}`, `{seed}`, and
+artifacts published by previous steps. The process must exit zero and create
+every declared artifact. Configuration files using command plugins are trusted,
+executable research inputs and must be reviewed before use. An optional positive
+`timeout_seconds` bounds adapter execution; the default remains unlimited for
+long model jobs.
 
 Python users may register in-process plugins through `PluginRegistry`.
 
@@ -36,6 +39,12 @@ The first-party Linux/AF3 plugins are:
 
 The first-party model plugins are imported lazily. Listing plugins or planning a
 workflow therefore does not import JAX or AF3 on a laptop.
+
+The unvalidated generic `command` plugin is intentionally not registered for
+inverse folding. Use `candidate_command`, which rejects framework mutations,
+invalid residues, wrong lengths, duplicate IDs, and empty candidate pools before
+the Consistency Gate can run. Custom Python inverse-folding plugins are trusted
+extensions and must enforce the same candidate contract.
 
 ## Inverse-folding contract
 
@@ -86,3 +95,7 @@ is recorded as `skipped` rather than silently selecting a low-scoring sequence.
 Each completed step records its plugin configuration hash, artifacts, hashes,
 metrics, and runtime. `--resume` skips only steps marked completed under the
 same complete configuration hash. Configuration drift fails closed.
+
+The built-in AF3 path additionally binds checkpoint logits to the Hallucination
+configuration and populated-input hashes, binds Consistency output to its anchor
+manifest, and revalidates selected CDR-only candidates before final AF3.

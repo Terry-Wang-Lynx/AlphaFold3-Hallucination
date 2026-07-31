@@ -6,7 +6,9 @@ remains usable on macOS without an AlphaFold 3 installation.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import math
 import os
 import platform
 import socket
@@ -19,7 +21,7 @@ import numpy as np
 
 from ..config import HallucinationSpec
 from ..contracts import normalize_candidate_pool
-from ..hashing import sha256_file
+from ..hashing import canonical_sha256, sha256_file
 from .engine import AA_INDEX, AF3_AA_ORDER
 
 
@@ -47,13 +49,95 @@ def _load_json(path: str | Path) -> dict[str, Any]:
     return value
 
 
+def _manifest_file(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    path_key: str,
+    sha256_key: str,
+    label: str,
+) -> Path:
+    raw = manifest.get(path_key)
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{label} path is missing from {manifest_path}")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = manifest_path.parent / path
+    path = path.resolve()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    expected = manifest.get(sha256_key)
+    if not isinstance(expected, str) or sha256_file(path) != expected:
+        raise ValueError(f"{label} hash mismatch")
+    return path
+
+
+def _load_anchor(anchor_manifest: str | Path) -> tuple[Path, dict[str, Any], Path]:
+    anchor_path = Path(anchor_manifest).expanduser().resolve()
+    anchor = _load_json(anchor_path)
+    if anchor.get("schema_version") != "af3h_anchor_v1":
+        raise ValueError("anchor manifest has an unsupported schema_version")
+    if anchor.get("status") != "completed":
+        raise ValueError("anchor manifest is not completed")
+    candidate_input = _manifest_file(
+        anchor_path,
+        anchor,
+        path_key="candidate_input_path",
+        sha256_key="candidate_input_sha256",
+        label="anchor candidate input",
+    )
+    return anchor_path, anchor, candidate_input
+
+
+def _index_vector(name: str, values: Any, *, size: int) -> np.ndarray:
+    if not isinstance(values, (list, tuple, np.ndarray)):
+        raise ValueError(f"{name} must be a non-empty one-dimensional index list")
+    if any(isinstance(value, bool) or not isinstance(value, (int, np.integer)) for value in values):
+        raise ValueError(f"{name} must contain only integers")
+    array = np.asarray(values, np.int32)
+    if array.ndim != 1 or array.size == 0:
+        raise ValueError(f"{name} must be a non-empty one-dimensional index list")
+    if np.any(array < 0) or np.any(array >= size):
+        raise ValueError(f"{name} contains an out-of-range value")
+    if np.unique(array).size != array.size:
+        raise ValueError(f"{name} contains duplicate values")
+    return array
+
+
+def _anchor_layout(anchor: dict[str, Any], batch, *, binder_asym_id: int):
+    valid, binder, binder_indices = _token_layout(batch, binder_asym_id=binder_asym_id)
+    design = _index_vector(
+        "anchor design_token_indices", anchor.get("design_token_indices"), size=valid.size
+    )
+    design_local = _index_vector(
+        "anchor design_local_indices",
+        anchor.get("design_local_indices"),
+        size=binder_indices.size,
+    )
+    if design.size != design_local.size or not np.array_equal(
+        binder_indices[design_local], design
+    ):
+        raise ValueError("anchor global and chain-local design indices disagree")
+    hotspot = _index_vector(
+        "anchor hotspot_token_indices", anchor.get("hotspot_token_indices"), size=valid.size
+    )
+    if np.any(~valid[design]) or np.any(~binder[design]):
+        raise ValueError("anchor design indices are not valid antibody tokens")
+    if np.any(~valid[hotspot]) or np.any(binder[hotspot]):
+        raise ValueError("anchor hotspot indices are not valid antigen tokens")
+    return valid, binder, binder_indices, design, design_local, hotspot
+
+
 def _protein_sequence(path: Path, chain_id: str) -> str:
     document = _load_json(path)
     matches = []
     for entry in document.get("sequences", []):
         protein = entry.get("protein")
         identifier = None if protein is None else protein.get("id")
-        if protein and (identifier == chain_id or (isinstance(identifier, list) and chain_id in identifier)):
+        if protein and (
+            identifier == chain_id
+            or (isinstance(identifier, list) and identifier == [chain_id])
+        ):
             matches.append(str(protein["sequence"]))
     if len(matches) != 1:
         raise ValueError(f"expected one protein chain {chain_id!r} in {path}")
@@ -95,16 +179,20 @@ def _resolve_indices(batch, spec: HallucinationSpec):
     if "design_token_indices" in backend and "design_local_indices" in backend:
         raise ValueError("provide only one of design_token_indices/design_local_indices")
     if "design_token_indices" in backend:
-        design = np.asarray(backend["design_token_indices"], np.int32)
+        design = _index_vector(
+            "design_token_indices", backend["design_token_indices"], size=valid.size
+        )
         local_lookup = {int(token): index for index, token in enumerate(binder_indices)}
         try:
             design_local = np.asarray([local_lookup[int(token)] for token in design], np.int32)
         except KeyError as exc:
             raise ValueError("a design token is outside the binder chain") from exc
     elif "design_local_indices" in backend:
-        design_local = np.asarray(backend["design_local_indices"], np.int32)
-        if np.any(design_local < 0) or np.any(design_local >= binder_indices.size):
-            raise ValueError("a design-local index is outside the binder chain")
+        design_local = _index_vector(
+            "design_local_indices",
+            backend["design_local_indices"],
+            size=binder_indices.size,
+        )
         design = binder_indices[design_local]
     else:
         design_local = np.arange(binder_indices.size, dtype=np.int32)
@@ -112,12 +200,14 @@ def _resolve_indices(batch, spec: HallucinationSpec):
     if "hotspot_token_indices" in backend and "hotspot_local_indices" in backend:
         raise ValueError("provide only one of hotspot_token_indices/hotspot_local_indices")
     if "hotspot_token_indices" in backend:
-        hotspot = np.asarray(backend["hotspot_token_indices"], np.int32)
+        hotspot = _index_vector(
+            "hotspot_token_indices", backend["hotspot_token_indices"], size=valid.size
+        )
     elif "hotspot_local_indices" in backend:
         target = np.flatnonzero(valid & (asym == target_asym_id))
-        local = np.asarray(backend["hotspot_local_indices"], np.int32)
-        if np.any(local < 0) or np.any(local >= target.size):
-            raise ValueError("a hotspot-local index is outside the target chain")
+        local = _index_vector(
+            "hotspot_local_indices", backend["hotspot_local_indices"], size=target.size
+        )
         hotspot = target[local]
     else:
         hotspot = np.flatnonzero(valid & ~binder)
@@ -138,8 +228,8 @@ def _hybrid_features(batch, design_indices, pseudo20, query20, width: int):
     expected_profile = hard_profile + query_weight * (query31 - hard_onehot)
     n_tokens = int(np.asarray(batch["seq_mask"]).size)
     pseudo_full = jnp.zeros((n_tokens, width), pseudo31.dtype).at[indices].set(pseudo31)
-    profile_full = jnp.zeros((n_tokens, width), expected_profile.dtype).at[indices].set(
-        expected_profile
+    profile_full = (
+        jnp.zeros((n_tokens, width), expected_profile.dtype).at[indices].set(expected_profile)
     )
     return pseudo_full, profile_full
 
@@ -169,6 +259,89 @@ def decode_checkpoint(
 ) -> dict[str, Any]:
     """Decode one exact pre-update Hallucination checkpoint with AF3 diffusion."""
 
+    if trunk_seed < 0 or diffusion_seed < 0:
+        raise ValueError("AF3 seeds must be nonnegative")
+    if diffusion_steps < 1 or num_recycles < 0:
+        raise ValueError("diffusion_steps must be positive and num_recycles nonnegative")
+
+    input_path = Path(input_json).resolve()
+    checkpoint_path = Path(checkpoints_json).resolve()
+    model_path = Path(model_dir).resolve()
+    root = Path(output_dir).resolve()
+    manifest = _load_json(checkpoint_path)
+    if manifest.get("schema_version") != "af3h_checkpoints_v1":
+        raise ValueError("checkpoints.json has an unsupported schema_version")
+    expected_hallucination_sha256 = canonical_sha256(dataclasses.asdict(public_spec))
+    if manifest.get("hallucination_sha256") != expected_hallucination_sha256:
+        raise ValueError("checkpoints.json belongs to a different Hallucination configuration")
+    if manifest.get("input_sha256") != sha256_file(input_path):
+        raise ValueError("checkpoints.json belongs to a different populated AF3 input")
+    records = manifest.get("checkpoints")
+    if not isinstance(records, list) or not records:
+        raise ValueError("Hallucination produced no checkpoint records")
+    if any(not isinstance(record, dict) for record in records):
+        raise ValueError("every checkpoint record must be a JSON object")
+    seen_forwards: set[int] = set()
+    seen_paths: set[str] = set()
+    for record in records:
+        forward = record.get("evaluation_forward")
+        if isinstance(forward, bool) or not isinstance(forward, int) or forward < 1:
+            raise ValueError("checkpoint evaluation_forward must be a positive integer")
+        if forward in seen_forwards:
+            raise ValueError(f"duplicate checkpoint evaluation_forward: {forward}")
+        seen_forwards.add(forward)
+        raw_path = record.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError("checkpoint record has no valid path")
+        if raw_path in seen_paths:
+            raise ValueError(f"duplicate checkpoint path: {raw_path}")
+        seen_paths.add(raw_path)
+        if not isinstance(record.get("sha256"), str):
+            raise ValueError("checkpoint record has no valid SHA-256")
+        options = record.get("sequence_options")
+        if not isinstance(options, dict):
+            raise ValueError("checkpoint record has no valid sequence_options")
+    if checkpoint_forward is None:
+        checkpoint = max(records, key=lambda row: row["evaluation_forward"])
+    else:
+        matches = [row for row in records if row["evaluation_forward"] == checkpoint_forward]
+        if len(matches) != 1:
+            raise ValueError(f"expected one checkpoint at forward {checkpoint_forward}")
+        checkpoint = matches[0]
+    raw_logits_path = checkpoint.get("path")
+    if not isinstance(raw_logits_path, str) or not raw_logits_path.strip():
+        raise ValueError("checkpoint record has no valid path")
+    relative_logits_path = Path(raw_logits_path)
+    if relative_logits_path.is_absolute():
+        raise ValueError("checkpoint logits path must be relative to checkpoints.json")
+    logits_path = (checkpoint_path.parent / relative_logits_path).resolve()
+    if not logits_path.is_relative_to(checkpoint_path.parent):
+        raise ValueError("checkpoint logits path escapes the Hallucination run")
+    if not logits_path.is_file():
+        raise FileNotFoundError(logits_path)
+    if sha256_file(logits_path) != checkpoint["sha256"]:
+        raise ValueError("checkpoint logits hash mismatch")
+    logits = np.asarray(np.load(logits_path, allow_pickle=False), np.float32)
+    if not np.isfinite(logits).all():
+        raise ValueError("checkpoint logits contain non-finite values")
+    options = checkpoint["sequence_options"]
+    try:
+        soft = float(options["soft"])
+        temperature = float(options.get("temperature", options.get("temp")))
+        hard = float(options["hard"])
+        alpha = float(options.get("alpha", public_spec.alpha))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("checkpoint sequence_options are incomplete or non-numeric") from exc
+    if not all(math.isfinite(value) for value in (soft, temperature, hard, alpha)):
+        raise ValueError("checkpoint sequence_options must be finite")
+    if not (0.0 <= soft <= 1.0 and 0.0 <= hard <= 1.0):
+        raise ValueError("checkpoint soft and hard values must lie in [0, 1]")
+    if temperature <= 0.0 or alpha <= 0.0:
+        raise ValueError("checkpoint temperature and alpha must be positive")
+
+    binder_chain = str(public_spec.backend_config.get("binder_chain_id", "B"))
+    binder_sequence = _protein_sequence(input_path, binder_chain)
+
     import haiku as hk
     import jax
     import jax.numpy as jnp
@@ -183,33 +356,7 @@ def decode_checkpoint(
     from .sequence import SeqOpt, aa_bias, soft_seq
     from .trunk import WIDTH
 
-    input_path = Path(input_json).resolve()
-    checkpoint_path = Path(checkpoints_json).resolve()
-    model_path = Path(model_dir).resolve()
-    root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    manifest = _load_json(checkpoint_path)
-    records = list(manifest.get("checkpoints", []))
-    if not records:
-        raise ValueError("Hallucination produced no checkpoint records")
-    if checkpoint_forward is None:
-        checkpoint = max(records, key=lambda row: int(row["evaluation_forward"]))
-    else:
-        matches = [
-            row for row in records if int(row["evaluation_forward"]) == checkpoint_forward
-        ]
-        if len(matches) != 1:
-            raise ValueError(f"expected one checkpoint at forward {checkpoint_forward}")
-        checkpoint = matches[0]
-    logits_path = checkpoint_path.parent / checkpoint["path"]
-    if sha256_file(logits_path) != checkpoint["sha256"]:
-        raise ValueError("checkpoint logits hash mismatch")
-    logits = np.asarray(np.load(logits_path, allow_pickle=False), np.float32)
-    if not np.isfinite(logits).all():
-        raise ValueError("checkpoint logits contain non-finite values")
-
-    binder_chain = str(public_spec.backend_config.get("binder_chain_id", "B"))
-    binder_sequence = _protein_sequence(input_path, binder_chain)
     _, initial_batch = _raw_and_clean_batch(input_path, public_spec.bucket)
     binder_asym_id, _, design, design_local, hotspot = _resolve_indices(
         initial_batch, public_spec
@@ -218,22 +365,20 @@ def decode_checkpoint(
         raise ValueError(
             f"checkpoint logits shape {logits.shape} does not match {(len(design), 20)}"
         )
-    options = checkpoint["sequence_options"]
     bias = aa_bias(20, tuple(AA_INDEX[aa] for aa in public_spec.omit_amino_acids))
     state = soft_seq(
         jnp.asarray(logits),
         SeqOpt(
-            soft=float(options["soft"]),
-            temp=float(options.get("temperature", options.get("temp"))),
-            hard=float(options["hard"]),
-            alpha=float(options.get("alpha", public_spec.alpha)),
+            soft=soft,
+            temp=temperature,
+            hard=hard,
+            alpha=alpha,
         ),
         bias,
     )
     pseudo20 = np.asarray(state["pseudo"], np.float32)
     query20 = np.asarray(
-        float(options["hard"]) * state["hard"]
-        + (1.0 - float(options["hard"])) * state["soft"],
+        hard * state["hard"] + (1.0 - hard) * state["soft"],
         np.float32,
     )
     hard_ids = np.asarray([AA_INDEX[aa] for aa in binder_sequence], np.int32)
@@ -246,9 +391,7 @@ def decode_checkpoint(
     _, binder, _ = _token_layout(batch, binder_asym_id=binder_asym_id)
     if not np.array_equal(np.asarray(batch["aatype"])[binder], hard_ids):
         raise ValueError("anchor hard-carrier atom chemistry is stale")
-    pseudo_full, profile_full = _hybrid_features(
-        batch, design, pseudo20, query20, WIDTH
-    )
+    pseudo_full, profile_full = _hybrid_features(batch, design, pseudo20, query20, WIDTH)
     design_mask = np.zeros(np.asarray(batch["seq_mask"]).size, bool)
     design_mask[design] = True
     model_config = run_af3.make_model_config(
@@ -285,9 +428,9 @@ def decode_checkpoint(
     jax.block_until_ready(result["predicted_lddt"])
     result = jax.tree_util.tree_map(np.asarray, result)
     result = jax.tree_util.tree_map(
-        lambda value: value.astype(np.float32)
-        if getattr(value, "dtype", None) == jnp.bfloat16
-        else value,
+        lambda value: (
+            value.astype(np.float32) if getattr(value, "dtype", None) == jnp.bfloat16 else value
+        ),
         result,
     )
     result = dict(result)
@@ -372,20 +515,32 @@ def decode_checkpoint(
 
 def _threshold_eligibility(metrics: dict[str, float], thresholds: dict[str, Any]):
     rules = {
-        "consistency_loss_max": ("consistency_loss", lambda value, threshold: value <= threshold),
+        "consistency_loss_max": (
+            "consistency_loss",
+            lambda value, threshold: value <= threshold,
+        ),
         "all_cdr_plddt_min": ("all_cdr_plddt", lambda value, threshold: value >= threshold),
         "cdr3_plddt_min": ("cdr3_plddt", lambda value, threshold: value >= threshold),
-        "cdr_patch_pae_max": ("cdr_patch_pae_symmetric", lambda value, threshold: value <= threshold),
-        "cdr_patch_pde_max": ("cdr_patch_pde_symmetric", lambda value, threshold: value <= threshold),
+        "cdr_patch_pae_max": (
+            "cdr_patch_pae_symmetric",
+            lambda value, threshold: value <= threshold,
+        ),
+        "cdr_patch_pde_max": (
+            "cdr_patch_pde_symmetric",
+            lambda value, threshold: value <= threshold,
+        ),
     }
     unknown = set(thresholds) - set(rules)
     if unknown:
         raise ValueError(f"unknown Consistency threshold keys: {sorted(unknown)}")
-    checks = {
-        name: bool(compare(metrics[metric], float(thresholds[name])))
-        for name, (metric, compare) in rules.items()
-        if name in thresholds
-    }
+    checks = {}
+    for name, (metric, compare) in rules.items():
+        if name not in thresholds:
+            continue
+        threshold = float(thresholds[name])
+        if not math.isfinite(threshold):
+            raise ValueError(f"Consistency threshold {name} must be finite")
+        checks[name] = bool(compare(metrics[metric], threshold))
     return (all(checks.values()) if checks else True), checks
 
 
@@ -402,6 +557,34 @@ def score_consistency_pool(
     top_k: int,
 ) -> dict[str, Any]:
     """Rank CDR sequences with fixed anchor pseudo-beta geometry and no diffusion."""
+
+    if scorer_seed < 0 or design_recycles < 0:
+        raise ValueError("scorer_seed and design_recycles must be nonnegative")
+
+    anchor_path, anchor, base_input = _load_anchor(anchor_manifest)
+    pool_path = Path(candidate_pool).resolve()
+    pool = _load_json(pool_path)
+    candidates = normalize_candidate_pool(
+        pool,
+        reference_sequence=anchor["hard_sequence"],
+        design_local_indices=anchor["design_local_indices"],
+    )
+    if top_k < 1:
+        raise ValueError("Consistency top_k must be positive")
+    geometry_path = _manifest_file(
+        anchor_path,
+        anchor,
+        path_key="geometry_path",
+        sha256_key="geometry_sha256",
+        label="anchor geometry",
+    )
+    geometry = np.load(geometry_path, allow_pickle=False)
+    pseudo_beta = np.asarray(geometry["pseudo_beta"], np.float32)
+    geometry_valid = np.asarray(geometry["geometry_valid_mask"], bool)
+    binder_chain = str(anchor["binder_chain_id"])
+    binder_asym_id = int(anchor["binder_asym_id"])
+    if _protein_sequence(base_input, binder_chain) != anchor["hard_sequence"]:
+        raise ValueError("anchor hard_sequence differs from the hashed candidate input")
 
     import haiku as hk
     import jax
@@ -420,31 +603,9 @@ def score_consistency_pool(
     from .provenance import parameter_identifier, runtime_source_fingerprint
     from .trunk import WIDTH
 
-    anchor_path = Path(anchor_manifest).resolve()
-    anchor = _load_json(anchor_path)
-    pool_path = Path(candidate_pool).resolve()
-    pool = _load_json(pool_path)
-    candidates = normalize_candidate_pool(
-        pool,
-        reference_sequence=anchor["hard_sequence"],
-        design_local_indices=anchor["design_local_indices"],
-    )
-    if top_k < 1:
-        raise ValueError("Consistency top_k must be positive")
-    geometry_path = Path(anchor["geometry_path"])
-    if sha256_file(geometry_path) != anchor["geometry_sha256"]:
-        raise ValueError("anchor geometry hash mismatch")
-    geometry = np.load(geometry_path, allow_pickle=False)
-    pseudo_beta = np.asarray(geometry["pseudo_beta"], np.float32)
-    geometry_valid = np.asarray(geometry["geometry_valid_mask"], bool)
-    base_input = Path(anchor["candidate_input_path"])
-    binder_chain = str(anchor["binder_chain_id"])
-    binder_asym_id = int(anchor["binder_asym_id"])
-    design = np.asarray(anchor["design_token_indices"], np.int32)
-    design_local = np.asarray(anchor["design_local_indices"], np.int32)
     _, initial_batch = _raw_and_clean_batch(base_input, int(anchor["bucket"]))
-    valid, binder, binder_indices = _token_layout(
-        initial_batch, binder_asym_id=binder_asym_id
+    valid, binder, binder_indices, design, design_local, hotspot = _anchor_layout(
+        anchor, initial_batch, binder_asym_id=binder_asym_id
     )
     if pseudo_beta.shape != (valid.size, 3) or geometry_valid.shape != valid.shape:
         raise ValueError("anchor geometry layout differs from the AF3 token batch")
@@ -461,9 +622,7 @@ def score_consistency_pool(
     else:
         cdr3 = cdr.copy()
     patch = np.zeros(valid.size, bool)
-    patch[np.asarray(anchor["hotspot_token_indices"], np.int32)] = True
-    if not patch.any() or np.any(patch & binder):
-        raise ValueError("hotspot patch is empty or overlaps the antibody")
+    patch[hotspot] = True
     context = {"cdr_mask": cdr, "cdr3_mask": cdr3, "patch_mask": patch}
     model_config = run_af3.make_model_config(
         num_diffusion_samples=1,
@@ -591,6 +750,34 @@ def evaluate_selected_candidates(
 ) -> dict[str, Any]:
     """Run independent full AF3 prediction for selected sequences and seeds."""
 
+    if diffusion_steps < 1 or num_recycles < 0:
+        raise ValueError("diffusion_steps must be positive and num_recycles nonnegative")
+
+    if not seeds or len(set(seeds)) != len(seeds):
+        raise ValueError("final evaluator seeds must be non-empty and unique")
+    if any(isinstance(seed, bool) or not isinstance(seed, int) or seed < 0 for seed in seeds):
+        raise ValueError("final evaluator seeds must be nonnegative integers")
+    anchor_path, anchor, base_input = _load_anchor(anchor_manifest)
+    consistency_path = Path(consistency_results).resolve()
+    selection = _load_json(consistency_path)
+    if selection.get("schema_version") != "af3h_consistency_v1":
+        raise ValueError("Consistency results have an unsupported schema_version")
+    if selection.get("status") != "completed":
+        raise ValueError("Consistency results are not completed")
+    if selection.get("anchor_manifest_sha256") != sha256_file(anchor_path):
+        raise ValueError("Consistency results belong to a different anchor manifest")
+    selected = normalize_candidate_pool(
+        {"candidates": selection.get("selected")},
+        reference_sequence=anchor["hard_sequence"],
+        design_local_indices=anchor["design_local_indices"],
+    )
+    if any(candidate.get("eligible") is not True for candidate in selected):
+        raise ValueError("Consistency selected candidates must be explicitly eligible")
+    binder_chain = str(anchor["binder_chain_id"])
+    binder_asym_id = int(anchor["binder_asym_id"])
+    if _protein_sequence(base_input, binder_chain) != anchor["hard_sequence"]:
+        raise ValueError("anchor hard_sequence differs from the hashed candidate input")
+
     import jax
     import run_alphafold as run_af3
     from alphafold3.model import post_processing
@@ -598,20 +785,6 @@ def evaluate_selected_candidates(
     from .hybrid import candidate_input
     from .provenance import result_parameter_identifier, runtime_source_fingerprint
 
-    if not seeds or len(set(seeds)) != len(seeds):
-        raise ValueError("final evaluator seeds must be non-empty and unique")
-    anchor_path = Path(anchor_manifest).resolve()
-    anchor = _load_json(anchor_path)
-    consistency_path = Path(consistency_results).resolve()
-    selection = _load_json(consistency_path)
-    selected = list(selection.get("selected", []))
-    if not selected:
-        raise ValueError("Consistency results contain no selected candidates")
-    base_input = Path(anchor["candidate_input_path"])
-    binder_chain = str(anchor["binder_chain_id"])
-    binder_asym_id = int(anchor["binder_asym_id"])
-    design = np.asarray(anchor["design_token_indices"], np.int32)
-    hotspot = np.asarray(anchor["hotspot_token_indices"], np.int32)
     model_config = run_af3.make_model_config(
         num_diffusion_samples=1,
         num_recycles=num_recycles,
@@ -643,7 +816,9 @@ def evaluate_selected_candidates(
                 binder_chain=binder_chain,
             )
             raw_batch, batch = _raw_and_clean_batch(candidate_path, int(anchor["bucket"]))
-            valid, binder, _ = _token_layout(batch, binder_asym_id=binder_asym_id)
+            valid, binder, _, design, _, hotspot = _anchor_layout(
+                anchor, batch, binder_asym_id=binder_asym_id
+            )
             if not np.array_equal(np.asarray(batch["aatype"])[binder], candidate_ids):
                 raise ValueError("full AF3 candidate hard-sequence contract failed")
             cdr = np.zeros(valid.size, bool)
@@ -693,10 +868,7 @@ def evaluate_selected_candidates(
                         + _directed_mean(pae, target, binder)
                     ),
                     "cdr_patch_pae_symmetric": 0.5
-                    * (
-                        _directed_mean(pae, cdr, patch)
-                        + _directed_mean(pae, patch, cdr)
-                    ),
+                    * (_directed_mean(pae, cdr, patch) + _directed_mean(pae, patch, cdr)),
                     "ptm": float(np.asarray(metadata["ptm"])),
                     "iptm": float(np.asarray(metadata["iptm"])),
                     "ranking_score": float(np.asarray(metadata["ranking_score"])),

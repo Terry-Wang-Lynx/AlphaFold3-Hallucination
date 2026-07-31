@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import math
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config import HallucinationSpec, LossSpec, StageSpec
+from ..config import HallucinationSpec, LossSpec, StageSpec, validate_stopper
 from ..errors import ConfigurationError
 from .config import ContactSpec, DesignConfig, LossWeights, RematConfig, StageConfig
 
@@ -83,9 +84,12 @@ def design_config_from_public(spec: HallucinationSpec, *, remat: bool = True) ->
 
 
 def stage_config_from_public(stage: StageSpec, default_lr: float) -> StageConfig:
-    assert stage.soft_start is not None and stage.soft_end is not None
-    assert stage.temperature_start is not None and stage.temperature_end is not None
-    assert stage.hard_start is not None and stage.hard_end is not None
+    if stage.soft_start is None or stage.soft_end is None:
+        raise ConfigurationError("stage soft ramp endpoints are missing")
+    if stage.temperature_start is None or stage.temperature_end is None:
+        raise ConfigurationError("stage temperature ramp endpoints are missing")
+    if stage.hard_start is None or stage.hard_end is None:
+        raise ConfigurationError("stage hard ramp endpoints are missing")
     return StageConfig(
         name=stage.type,
         iterations=stage.steps,
@@ -405,6 +409,7 @@ class AF3JaxHallucinationEngine:
             optimizer = optimizer_factory(1.0)
             optimizer_state = optimizer.init(self.logits)
             stage_best: dict[str, Any] | None = None
+            stage_stopped = False
             started = time.time()
             from .config import ramp_value
 
@@ -467,9 +472,11 @@ class AF3JaxHallucinationEngine:
                 self.global_step += 1
                 if should_stop is not None and should_stop(dict(row)):
                     self.logits = eval_logits
+                    stage_stopped = True
                     break
                 self.logits = eval_logits + lr * updates
-            assert stage_best is not None
+            if stage_best is None:
+                raise RuntimeError("a non-empty gradient stage produced no evaluations")
             self.stage_summaries.append(
                 {
                     "stage": public_stage.name or public_stage.type,
@@ -480,7 +487,7 @@ class AF3JaxHallucinationEngine:
                     "runtime_seconds": round(time.time() - started, 6),
                 }
             )
-            if should_stop is not None and self.trajectory and should_stop(self.trajectory[-1]):
+            if stage_stopped:
                 break
         return list(self.trajectory)
 
@@ -500,24 +507,15 @@ class AF3JaxHallucinationEngine:
 def compile_stopper(spec: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bool]:
     """Compile a simple, explicit metric-based stopping rule."""
 
-    stopper_type = str(spec.get("type", "none"))
+    normalized = validate_stopper(spec)
+    stopper_type = normalized["type"]
     if stopper_type == "none":
         return lambda row: False
-    if stopper_type not in {"all", "any"}:
-        raise ConfigurationError("stopper.type must be none, all, or any")
-    conditions = spec.get("conditions")
-    if not isinstance(conditions, list) or not conditions:
-        raise ConfigurationError("metric stopper requires a non-empty conditions list")
     compiled = []
-    for condition in conditions:
-        if not isinstance(condition, Mapping):
-            raise ConfigurationError("stopper conditions must be mappings")
-        metric = str(condition.get("metric", ""))
-        operator = str(condition.get("operator", ""))
-        value = float(condition.get("value"))
-        if operator not in {"<=", "<", ">=", ">"}:
-            raise ConfigurationError("stopper operator must be <=, <, >=, or >")
-        compiled.append((metric, operator, value))
+    for condition in normalized["conditions"]:
+        compiled.append(
+            (condition["metric"], condition["operator"], condition["value"])
+        )
 
     def evaluate(row: Mapping[str, Any]) -> bool:
         outcomes = []
@@ -525,7 +523,14 @@ def compile_stopper(spec: Mapping[str, Any]) -> Callable[[Mapping[str, Any]], bo
             if metric not in row:
                 outcomes.append(False)
                 continue
-            value = float(row[metric])
+            try:
+                value = float(row[metric])
+            except (TypeError, ValueError):
+                outcomes.append(False)
+                continue
+            if not math.isfinite(value):
+                outcomes.append(False)
+                continue
             outcomes.append(
                 {
                     "<=": value <= threshold,

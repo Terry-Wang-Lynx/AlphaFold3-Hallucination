@@ -1,6 +1,6 @@
 # Release-candidate validation
 
-Version `0.1.0rc1` was reviewed on 2026-07-31. This page records what was
+Version `0.1.0rc2` was reviewed on 2026-07-31. This page records what was
 actually exercised. It is not a biological benchmark and does not claim that
 the bundled example schedule is optimal.
 
@@ -10,11 +10,29 @@ the bundled example schedule is optimal.
 | --- | --- | --- |
 | macOS arm64 | Python 3.14.6, clean editable and wheel environments | Core install, static checks, unit/integration tests, CLI, mock workflow, resume, audit, wheel and sdist passed. |
 | Linux x86_64 | Python 3.10.12, clean editable and wheel environments | The same core and packaging checks passed. |
-| Linux x86_64 + RTX 4090 | Official AF3 3.0.1 runtime, JAX 0.6.1, Haiku 0.0.14, NumPy 2.1.3 | AF3/JAX gradient, two schedules, diffusion anchor, fixed-geometry Consistency Gate, multi-seed full AF3, and the first-party five-step workflow passed on one visible GPU. |
+| Linux x86_64 + RTX 4090 | Official AF3 3.0.1 runtime, JAX 0.6.1, Haiku 0.0.14, NumPy 2.1.3 | The initial AF3/JAX gradient, two-schedule, diffusion, fixed-geometry Consistency, multi-seed final AF3, and five-step workflow acceptance passed on one visible GPU. |
+| Linux x86_64 + RTX 4090 | Official AF3 3.0.3 at `7b197fe`, JAX 0.9.1, Haiku 0.0.16, NumPy 2.4.1 | Final `0.1.0rc2` source repeated a one-forward gradient run and the complete five-step workflow on physical GPU 0; audit and resume passed with 13 linked artifacts. |
 
 The macOS claim is intentionally limited to the import-light research and
 orchestration layer. Native official AF3 CUDA inference is not claimed on
 Apple Silicon.
+
+## Independent release-readiness audit
+
+The second audit treated `code/` as a standalone future GitHub repository rather
+than inheriting the first candidate's conclusion. It added fail-closed checks
+for explicit chain-local CDR indices, inverse-folding candidate validation,
+environment expansion, checkpoint path containment, workflow resume integrity,
+artifact/config/input hash linkage, terminal-state consistency, numeric inputs,
+external-command timeouts, and final-candidate eligibility. The corresponding
+regression suite contains 57 tests.
+
+CI action references are pinned to immutable commits. `actionlint`, `gitleaks`,
+Ruff, `compileall`, Bandit, dependency vulnerability inspection, package
+metadata validation, wheel-content inspection, and relative-link checks were
+also included in the release review. Exact final commands and artifact hashes
+are recorded in the repository-level audit run rather than claimed by this
+standalone source tree.
 
 ## GPU scientific-contract checks
 
@@ -36,6 +54,11 @@ Apple Silicon.
 - A first-party `af3h antibody run` completed all five plugin boundaries,
   emitted 13 hashed artifacts, resumed without changing state, and passed the
   independent audit.
+- The final `0.1.0rc2` replay on AF3 3.0.3 produced finite one-forward loss
+  `8.09603`, an exact finite `float32 [37,20]` checkpoint, a zero-diffusion
+  two-candidate Consistency ranking, and one full-AF3 final evaluation. This
+  replay also exposed and fixed an argument-isolation incompatibility between
+  the argparse CLI and a lazily initialized Abseil/Tokamax runtime.
 
 These deliberately tiny runs validate execution, gradients, masks, fixed
 geometry, call separation, artifact contracts, seeds, and provenance. Their
@@ -59,9 +82,15 @@ The AF3 parameter identifier was
 `25505ca01c7e2b507045f0464a97ebfc45f456cb03c9855416e6f6dab16c2cf9`.
 Model parameters and raw structures are not distributed.
 
+Compatibility was additionally executed against official AF3 3.0.3 commit
+`7b197fe859790fc3e04d03ea70dd0b9ba48881c9`. Its imported modules are recorded
+by runtime SHA-256 in the generated run manifest. This compatibility replay
+does not redefine the older commit used as the semantic source basis for the
+ported trunk code.
+
 ## Remaining boundaries
 
-- The generic inverse-folding command adapter was contract-tested with an
+- The `candidate_command` inverse-folding adapter was contract-tested with an
   executable fixture. No third-party inverse-folding weights are bundled, and
   this release does not claim a scientific benchmark of one inverse folder.
 - `frozen_candidates` is for tests and fixed-sequence evaluations, not a design

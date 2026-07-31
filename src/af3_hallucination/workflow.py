@@ -10,6 +10,7 @@ import socket
 import sys
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,8 @@ class AntibodyWorkflow:
         self.registry = registry or default_registry()
 
     def plan(self) -> list[dict[str, Any]]:
-        assert self.config.antibody is not None
+        if self.config.antibody is None:
+            raise RuntimeError("antibody configuration is unavailable")
         return [
             {
                 "index": index,
@@ -89,30 +91,49 @@ class AntibodyWorkflow:
         if not resume:
             raise ResumeError(f"run already exists: {output_dir}; use --resume")
         state = json.loads(state_path.read_text())
+        if not isinstance(state, dict):
+            raise ResumeError("existing run_state.json must contain an object")
+        if state.get("schema_version") != "af3h_workflow_state_v1":
+            raise ResumeError("existing run_state.json has an unsupported schema_version")
         if state.get("config_sha256") != self.config.sha256:
             raise ResumeError("existing run config hash differs from the requested config")
-        for name, record in state.get("artifacts", {}).items():
-            path = Path(record.get("path", ""))
+        self._verify_artifacts(state)
+        return state
+
+    @staticmethod
+    def _verify_artifacts(state: Mapping[str, Any]) -> None:
+        records = state.get("artifacts", {})
+        if not isinstance(records, Mapping):
+            raise ResumeError("existing run artifact records must be a mapping")
+        for name, record in records.items():
+            if not isinstance(record, Mapping):
+                raise ResumeError(f"recorded artifact metadata is invalid: {name}")
+            raw_path = record.get("path")
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ResumeError(f"recorded artifact path is invalid: {name}")
+            path = Path(raw_path)
             if not path.is_file():
                 raise ResumeError(f"recorded artifact is missing: {name}")
-            if path.stat().st_size != int(record.get("bytes", -1)):
+            try:
+                expected_bytes = int(record.get("bytes", -1))
+            except (TypeError, ValueError) as exc:
+                raise ResumeError(f"recorded artifact byte count is invalid: {name}") from exc
+            if path.stat().st_size != expected_bytes:
                 raise ResumeError(f"recorded artifact byte count changed: {name}")
             if sha256_file(path) != record.get("sha256"):
                 raise ResumeError(f"recorded artifact hash changed: {name}")
-        return state
 
     def run(self, output_dir: str | Path, *, resume: bool = False) -> dict[str, Any]:
         root = Path(output_dir).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
         state = self._load_or_create(root, resume)
         state_path = root / "run_state.json"
-        if resume and state.get("status") in {"completed", "rejected"}:
+        if resume and state.get("status") in {"completed", "rejected", "skipped"}:
             return state
         _atomic_json(root / "resolved_config.json", self.config.to_dict())
         _atomic_json(state_path, state)
         artifacts = {
-            name: Path(record["path"])
-            for name, record in state.get("artifacts", {}).items()
+            name: Path(record["path"]) for name, record in state.get("artifacts", {}).items()
         }
         context = WorkflowContext(
             output_dir=root,
@@ -126,7 +147,8 @@ class AntibodyWorkflow:
                 else Path.cwd()
             ),
         )
-        assert self.config.antibody is not None
+        if self.config.antibody is None:
+            raise RuntimeError("antibody configuration is unavailable")
         try:
             for index, step_name in enumerate(WORKFLOW_STEPS):
                 existing = state["steps"].get(step_name)
@@ -148,6 +170,7 @@ class AntibodyWorkflow:
                 state["updated_at_unix"] = time.time()
                 _atomic_json(state_path, state)
                 result = plugin.run(context=context, config=spec.config)
+                self._verify_artifacts(state)
                 artifact_records = {}
                 for name, path in result.artifacts.items():
                     if name in state["artifacts"]:

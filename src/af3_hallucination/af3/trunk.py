@@ -118,9 +118,11 @@ class DesignEvoformer(evoformer_network.Evoformer):
         return evoformer_output['pair'], key
 
     def __call__(self, batch, prev, target_feat, key):
-        assert self.global_config.bfloat16 in {'all', 'none'}
+        if self.global_config.bfloat16 not in {"all", "none"}:
+            raise ValueError("global_config.bfloat16 must be 'all' or 'none'")
         num_residues = target_feat.shape[0]
-        assert batch.token_features.aatype.shape == (num_residues,)
+        if batch.token_features.aatype.shape != (num_residues,):
+            raise ValueError("aatype shape differs from target_feat token count")
         dtype = jnp.bfloat16 if self.global_config.bfloat16 == 'all' else jnp.float32
 
         with utils.bfloat16_context():

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "af3-hallucination"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "Extensible JAX hallucination and antibody-design workflows for AlphaFold 3"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,8 +26,8 @@ classifiers = [
 dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
-af3 = ["jax==0.6.1", "dm-haiku==0.0.14", "optax==0.2.8", "numpy>=2.1,<2.3"]
 dev = ["build>=1.2", "numpy>=1.26", "pytest>=8.2", "pytest-cov>=5", "ruff>=0.9"]
+release = ["check-wheel-contents>=0.6", "twine>=6", "validate-pyproject>=0.24"]
 
 [project.scripts]
 af3h = "af3_hallucination.cli:main"

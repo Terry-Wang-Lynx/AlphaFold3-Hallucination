@@ -12,6 +12,7 @@
 ## Audited source snapshots
 
 - AlphaFold 3: `b2f3d45fbfcacc5183bd5345d15df93571b8437f`
+- AlphaFold 3 runtime compatibility replay: `7b197fe859790fc3e04d03ea70dd0b9ba48881c9`
 - BindCraft: `b971db42ba6e091afab63ccb30ae02215150a990`
 - ColabDesign: `e31a56fe1d9b4de25c8697f3a28b75892941cc72`
 - ProteinMPNN: `8907e6671bfbfc92303b5f79c4b5e6ce47cdef57`

@@ -26,6 +26,7 @@ class LocalExecutor:
         *,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
     ) -> CompletedExecution:
         process_env = os.environ.copy()
         process_env.update(dict(env or {}))
@@ -36,8 +37,11 @@ class LocalExecutor:
             text=True,
             capture_output=True,
             check=False,
+            timeout=timeout_seconds,
         )
-        return CompletedExecution(tuple(command), result.returncode, result.stdout, result.stderr)
+        return CompletedExecution(
+            tuple(command), result.returncode, result.stdout, result.stderr
+        )
 
 
 class SSHExecutor:
@@ -55,6 +59,7 @@ class SSHExecutor:
         *,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
     ) -> CompletedExecution:
         parts = []
         if cwd is not None:
@@ -73,5 +78,6 @@ class SSHExecutor:
             text=True,
             capture_output=True,
             check=False,
+            timeout=timeout_seconds,
         )
         return CompletedExecution(full, result.returncode, result.stdout, result.stderr)

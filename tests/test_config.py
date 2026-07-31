@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from af3_hallucination.af3.engine import compile_stopper
 from af3_hallucination.config import ConfigurationError, load_config, parse_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,3 +67,49 @@ def test_antibody_invariants_fail_closed():
     value["antibody"]["framework_fixed"] = False
     with pytest.raises(ConfigurationError, match="currently requires"):
         parse_config(value)
+
+
+def test_first_party_antibody_requires_explicit_chain_local_design_indices():
+    value = load_config(ROOT / "configs/antibody/example.yaml").to_dict()
+    value["hallucination"]["backend_config"].pop("design_local_indices")
+    with pytest.raises(ConfigurationError, match="requires.*design_local_indices"):
+        parse_config(value)
+
+
+def test_antibody_rejects_unvalidated_generic_inverse_folding_command():
+    value = load_config(ROOT / "configs/antibody/mock.yaml").to_dict()
+    value["antibody"]["inverse_folding"]["plugin"] = "command"
+    with pytest.raises(ConfigurationError, match="must use candidate_command"):
+        parse_config(value)
+
+
+@pytest.mark.parametrize(
+    "stopper, message",
+    [
+        ({"type": "none", "conditions": []}, "unknown keys"),
+        (
+            {"type": "all", "conditions": [{"operator": "<=", "value": 0.1}]},
+            "metric must be non-empty",
+        ),
+        (
+            {
+                "type": "all",
+                "conditions": [{"metric": "loss", "operator": "<=", "value": "nan"}],
+            },
+            "must be finite",
+        ),
+    ],
+)
+def test_metric_stopper_rejects_ambiguous_or_nonfinite_rules(stopper, message):
+    with pytest.raises(ConfigurationError, match=message):
+        compile_stopper(stopper)
+
+
+def test_metric_stopper_fails_closed_on_nonfinite_runtime_metric():
+    stopper = compile_stopper(
+        {
+            "type": "all",
+            "conditions": [{"metric": "loss", "operator": "<=", "value": 0.1}],
+        }
+    )
+    assert stopper({"loss": float("nan")}) is False

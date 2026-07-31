@@ -83,7 +83,11 @@ def candidate_input(base_input: Path, hard_ids, output: Path, binder_chain="B") 
     found = False
     for entry in obj["sequences"]:
         protein = entry.get("protein")
-        if protein and protein.get("id") == binder_chain:
+        identifier = None if protein is None else protein.get("id")
+        if protein and (
+            identifier == binder_chain
+            or (isinstance(identifier, list) and identifier == [binder_chain])
+        ):
             protein["sequence"] = sequence
             protein["unpairedMsa"] = replace_first_a3m_sequence(
                 protein.get("unpairedMsa", ""), sequence

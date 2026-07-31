@@ -1,7 +1,9 @@
 # Configuration
 
-Configuration uses strict YAML with `schema_version: 1`. Unknown keys fail
-validation, while project-specific metadata may be stored below `extensions`.
+Configuration uses strict YAML with `schema_version: 1`. Unknown schema keys
+fail parsing, while project-specific metadata may be stored below `extensions`.
+Built-in plugin configurations reject unknown keys when that plugin executes;
+custom plugin configuration remains the responsibility of its implementation.
 
 ## Hallucination stages
 
@@ -59,7 +61,11 @@ backend_config:
 
 For production antibody runs, derive and freeze CDR indices with a documented
 numbering scheme before launching the model. The package deliberately does not
-guess CDR boundaries from sequence alone.
+guess CDR boundaries from sequence alone. The first-party antibody plugin
+requires non-empty chain-local `design_local_indices`; it will not silently
+fall back to redesigning the complete antibody chain. The binder chain must be
+represented by its own scalar ID (or a one-element ID list), rather than a
+multi-chain homomer ID list.
 
 ## Checkpoints and stopping
 

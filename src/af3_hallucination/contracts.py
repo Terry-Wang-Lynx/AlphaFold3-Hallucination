@@ -21,7 +21,12 @@ def normalize_candidate_pool(
     raw = payload.get("candidates", payload.get("sequences"))
     if not isinstance(raw, list) or not raw:
         raise PluginError("candidate pool must contain a non-empty candidates list")
-    design = {int(value) for value in design_local_indices}
+    design_values = list(design_local_indices)
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in design_values):
+        raise PluginError("design_local_indices must contain only integers")
+    design = set(design_values)
+    if len(design) != len(design_values):
+        raise PluginError("design_local_indices must not contain duplicates")
     if not design or min(design) < 0 or max(design) >= len(reference_sequence):
         raise PluginError("design_local_indices are empty or outside the binder sequence")
     normalized: list[dict[str, Any]] = []
