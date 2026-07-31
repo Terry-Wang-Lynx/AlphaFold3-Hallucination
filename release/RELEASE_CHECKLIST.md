@@ -21,7 +21,9 @@ Release-candidate review date: 2026-07-31.
 - [x] License, NOTICE, citations, contribution, and security documents are present.
 - [x] Release tree contains no parameters, databases, populated inputs, raw structures, private paths, or large outputs.
 - [x] Wheel and sdist contents have been inspected.
-- [ ] Publish to GitHub, PyPI, or another public service.
+- [x] Publish the audited source tree to GitHub.
+- [ ] Publish a package to PyPI or another package index.
 
-Publication is deliberately held. The machine-readable manifest keeps
-`published=false` until the researcher separately authorizes release.
+The source repository is published at
+<https://github.com/Terry-Wang-Lynx/AlphaFold3-Hallucination>. Package-index
+publication remains a separate, unauthorised action.

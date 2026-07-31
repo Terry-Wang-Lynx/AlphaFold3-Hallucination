@@ -19,8 +19,8 @@ Apple Silicon.
 
 ## Independent release-readiness audit
 
-The second audit treated `code/` as a standalone future GitHub repository rather
-than inheriting the first candidate's conclusion. It added fail-closed checks
+The second audit treated `code/` as a standalone GitHub repository rather than
+inheriting the first candidate's conclusion. It added fail-closed checks
 for explicit chain-local CDR indices, inverse-folding candidate validation,
 environment expansion, checkpoint path containment, workflow resume integrity,
 artifact/config/input hash linkage, terminal-state consistency, numeric inputs,

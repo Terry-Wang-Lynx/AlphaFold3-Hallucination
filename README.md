@@ -3,8 +3,8 @@
 An extensible JAX research framework for AlphaFold 3 sequence hallucination,
 plus a modular antibody-design workflow.
 
-> Status: GitHub-ready release candidate; publication is deliberately held. This
-> repository does not include AlphaFold 3 parameters, genetic databases,
+> Status: public research release candidate `0.1.0rc2`. This repository does not
+> include AlphaFold 3 parameters, genetic databases,
 > third-party inverse-folding model weights, or precomputed biological inputs.
 
 ## What is included
@@ -91,5 +91,7 @@ ColabDesign, ProteinMPNN, and optional inverse-folding tools retain their own
 licenses and must be installed separately. See [NOTICE](NOTICE) and
 [docs/references.md](docs/references.md).
 
-The current tree is a GitHub-ready release candidate, not a published release.
-See [release/RELEASE_CHECKLIST.md](release/RELEASE_CHECKLIST.md).
+The canonical source repository is
+[Terry-Wang-Lynx/AlphaFold3-Hallucination](https://github.com/Terry-Wang-Lynx/AlphaFold3-Hallucination).
+See [release/RELEASE_CHECKLIST.md](release/RELEASE_CHECKLIST.md) for the audited
+release scope.

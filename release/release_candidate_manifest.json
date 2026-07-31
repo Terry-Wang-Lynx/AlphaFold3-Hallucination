@@ -22,10 +22,12 @@
   },
   "project": "AlphaFold3 Hallucination",
   "github_submission_ready": true,
-  "github_submitted": false,
-  "published": false,
+  "github_submitted": true,
+  "published": true,
+  "pypi_published": false,
+  "repository_url": "https://github.com/Terry-Wang-Lynx/AlphaFold3-Hallucination",
   "review_date": "2026-07-31",
-  "review_status": "github_ready_unpublished",
-  "schema_version": "af3h_release_candidate_v2",
+  "review_status": "github_published",
+  "schema_version": "af3h_release_candidate_v3",
   "version": "0.1.0rc2"
 }
