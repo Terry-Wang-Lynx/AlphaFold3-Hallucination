@@ -1,5 +1,11 @@
 # AlphaFold3 Hallucination
 
+> [!WARNING]
+> **Antibody-design validation status:** The effectiveness of the antibody-design
+> workflow has not been rigorously validated experimentally. Its outputs must be
+> treated as computational research hypotheses, not as evidence of binding,
+> therapeutic efficacy, or safety.
+
 An extensible JAX research framework for AlphaFold 3 sequence hallucination,
 plus a modular antibody-design workflow.
 
